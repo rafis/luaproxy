@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 - 2012, Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
+ * Copyright (c) 2011 - 2013, Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -12,7 +12,7 @@
  *     * Neither the name of Micro Systems Marc Balmer nor the
  *       names of its contributors may be used to endorse or promote products
  *       derived from this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -24,11 +24,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 /* State proxy for Lua */
 
 #include <sys/types.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <lua.h>
@@ -38,7 +39,7 @@
 #include "luaproxy.h"
 
 static int proxy_dostring(lua_State *);
-static void proxy_unmap(lua_State *L, lua_State *R, int t);
+static void proxy_unmap(lua_State *L, lua_State *R);
 
 static int
 proxy_clear(lua_State *L)
@@ -53,7 +54,8 @@ static int
 object_clear(lua_State *L)
 {
 	proxy_object *o = luaL_checkudata(L, 1, OBJECT_METATABLE);
-	luaL_unref(o->L, o->t, o->ref);
+
+	luaL_unref(o->L, LUA_REGISTRYINDEX, o->ref);
 	return 0;
 }
 
@@ -70,18 +72,18 @@ proxy_index(lua_State *L)
 		snprintf(nam, sizeof nam, "%d", (int)lua_tonumber(L, -1));
 	else
 		snprintf(nam, sizeof nam, "%s", lua_tostring(L, -1));
+
 	if (!strcmp(nam, "dostring"))
 		lua_pushcfunction(L, proxy_dostring);
 	else {
-		lua_getfield(p->L, LUA_GLOBALSINDEX, nam);
-		proxy_unmap(L, p->L, LUA_GLOBALSINDEX);
+		lua_getglobal(p->L, nam);
+		proxy_unmap(L, p->L);
 	}
-
 	return 1;
 }
 
 static void
-proxy_map(lua_State *L, lua_State *R, int t)
+proxy_map(lua_State *L, lua_State *R, int t, int global)
 {
 	int top;
 	char nam[64];
@@ -103,38 +105,37 @@ proxy_map(lua_State *L, lua_State *R, int t)
 	switch (lua_type(L, -1)) {
 	case LUA_TBOOLEAN:
 		lua_pushboolean(R, lua_toboolean(L, -1));
-		lua_settable(R, t);
 		break;
 	case LUA_TNUMBER:
 		lua_pushnumber(R, lua_tonumber(L, -1));
-		lua_settable(R, t);
 		break;
 	case LUA_TSTRING:
 		lua_pushstring(R, lua_tostring(L, -1));
-		lua_settable(R, t);
 		break;
 	case LUA_TNIL:
 		lua_pushnil(R);
-		lua_settable(R, t);
 		break;
 	case LUA_TTABLE:
 		top = lua_gettop(L);
 		lua_newtable(R);
 		lua_pushnil(L);  /* first key */
 		while (lua_next(L, top) != 0) {
-			proxy_map(L, R, lua_gettop(R));
+			proxy_map(L, R, lua_gettop(R), 0);
 			lua_pop(L, 1);
 		}
 		lua_pop(L, 1);
-		lua_settable(R, t);
 		break;
 	default:
 		printf("unknown type %s\n", nam);
 	}
+	if (global)
+		lua_setglobal(R, nam);
+	else
+		lua_settable(R, t);
 }
 
 static void
-proxy_unmap(lua_State *L, lua_State *R, int t)
+proxy_unmap(lua_State *L, lua_State *R)
 {
 	proxy_object *o;
 
@@ -154,11 +155,10 @@ proxy_unmap(lua_State *L, lua_State *R, int t)
 	case LUA_TFUNCTION:
 	case LUA_TTABLE:
 		o = lua_newuserdata(L, sizeof(proxy_object));
-		o->L = R;
-		o->ref = luaL_ref(R, t);
-		o->t = t;
 		luaL_getmetatable(L, OBJECT_METATABLE);
 		lua_setmetatable(L, -2);
+		o->L = R;
+		o->ref = luaL_ref(R, LUA_REGISTRYINDEX);
 		break;
 	default:
 		printf("unsupported type %s\n", luaL_typename(R, -1));
@@ -171,8 +171,7 @@ proxy_newindex(lua_State *L)
 	proxy_data *p;
 
 	p = luaL_checkudata(L, 1, PROXY_METATABLE);
-	proxy_map(L, p->L, LUA_GLOBALSINDEX);
-
+	proxy_map(L, p->L, 0, 1);
 	return 0;
 }
 
@@ -183,8 +182,8 @@ object_newindex(lua_State *L)
 
 	o = luaL_checkudata(L, -3, OBJECT_METATABLE);
 
-	lua_rawgeti(o->L, o->t, o->ref);
-	proxy_map(L, o->L, lua_gettop(o->L));
+	lua_rawgeti(o->L, LUA_REGISTRYINDEX, o->ref);
+	proxy_map(L, o->L, lua_gettop(o->L), 0);
 	lua_pop(o->L, 1);
 	return 0;
 }
@@ -195,8 +194,7 @@ object_index(lua_State *L)
 	proxy_object *o;
 
 	o = luaL_checkudata(L, -2, OBJECT_METATABLE);
-
-	lua_rawgeti(o->L, o->t, o->ref);
+	lua_rawgeti(o->L, LUA_REGISTRYINDEX, o->ref);
 
 	switch (lua_type(L, -1)) {
 	case LUA_TNUMBER:
@@ -209,11 +207,8 @@ object_index(lua_State *L)
 		return luaL_error(L, "proxy: data type '%s' is not "
 		    "supported as an index value", luaL_typename(L, -1));
 	}
-
-
 	lua_gettable(o->L, -2);
-	proxy_unmap(L, o->L, o->t);
-	lua_pop(o->L, 1);
+	proxy_unmap(L, o->L);
 	return 1;
 }
 
@@ -223,7 +218,7 @@ object_call(lua_State *L)
 	proxy_object *o;
 
 	o = luaL_checkudata(L, 1, OBJECT_METATABLE);
-	lua_rawgeti(o->L, o->t, o->ref);
+	lua_rawgeti(o->L, LUA_REGISTRYINDEX, o->ref);
 	lua_pcall(o->L, 0, 0, 0);
 	lua_pop(o->L, 1);
 	return 0;
@@ -279,31 +274,32 @@ static void
 proxy_set_info(lua_State *L)
 {
 	lua_pushliteral(L, "_COPYRIGHT");
-	lua_pushliteral(L, "Copyright (C) 2011 micro systems marc balmer");
+	lua_pushliteral(L, "Copyright (C) 2011 - 2013 by "
+	    "micro systems marc balmer");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_DESCRIPTION");
 	lua_pushliteral(L, "State proxy for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "proxy 1.0.0");
+	lua_pushliteral(L, "proxy 1.1.0");
 	lua_settable(L, -3);
 }
 
 int
 luaopen_proxy(lua_State *L)
 {
-	struct luaL_reg luaproxy[] = {
+	struct luaL_Reg luaproxy[] = {
 		{ "dostring", proxy_dostring },
 		{ "new", proxy_new },
 		{ NULL, NULL }
 	};
-	struct luaL_reg proxy_methods[] = {
+	struct luaL_Reg proxy_methods[] = {
 		{ "__index", proxy_index },
 		{ "__newindex", proxy_newindex },
 		{ "__gc", proxy_clear },
 		{ NULL, NULL }
 	};
-	struct luaL_reg object_methods[] = {
+	struct luaL_Reg object_methods[] = {
 		{ "__index", object_index },
 		{ "__newindex", object_newindex },
 		{ "__call", object_call },
@@ -312,23 +308,32 @@ luaopen_proxy(lua_State *L)
 	};
 	/* The PROXY metatable */
 	if (luaL_newmetatable(L, PROXY_METATABLE)) {
+#if LUA_VERSION_NUM >= 502
+		luaL_setfuncs(L, proxy_methods, 0);
+#else
 		luaL_register(L, NULL, proxy_methods);
-
+#endif
 		lua_pushliteral(L, "__metatable");
 		lua_pushliteral(L, "must not access this metatable");
 		lua_settable(L, -3);
 	}
 	lua_pop(L, 1);
 	if (luaL_newmetatable(L, OBJECT_METATABLE)) {
+#if LUA_VERSION_NUM >= 502
+		luaL_setfuncs(L, object_methods, 0);
+#else
 		luaL_register(L, NULL, object_methods);
+#endif
 		lua_pushliteral(L, "__metatable");
 		lua_pushliteral(L, "must not access this metatable");
 		lua_settable(L, -3);
 	}
 	lua_pop(L, 1);
-
+#if LUA_VERSION_NUM >= 502
+	luaL_newlib(L, luaproxy);
+#else
 	luaL_register(L, "proxy", luaproxy);
+#endif
 	proxy_set_info(L);
-
 	return 1;
 }
