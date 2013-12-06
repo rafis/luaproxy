@@ -132,6 +132,8 @@ proxy_map(lua_State *L, lua_State *R, int t, int global)
 		lua_setglobal(R, nam);
 	else
 		lua_settable(R, t);
+	if (global || lua_type(L, -1) == LUA_TTABLE)
+		lua_pop(R, 1);
 }
 
 static void
@@ -209,6 +211,7 @@ object_index(lua_State *L)
 	}
 	lua_gettable(o->L, -2);
 	proxy_unmap(L, o->L);
+	lua_pop(o->L, 1);
 	return 1;
 }
 
@@ -281,7 +284,7 @@ proxy_set_info(lua_State *L)
 	lua_pushliteral(L, "State proxy for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "proxy 1.1.0");
+	lua_pushliteral(L, "proxy 1.1.1");
 	lua_settable(L, -3);
 }
 
