@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 - 2013, Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
+ * Copyright (c) 2011 - 2014, Micro Systems Marc Balmer, CH-5073 Gipf-Oberfrick
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -85,7 +85,7 @@ proxy_index(lua_State *L)
 static void
 proxy_map(lua_State *L, lua_State *R, int t, int global)
 {
-	int top;
+	int top, pop = 0;
 	char nam[64];
 
 	switch (lua_type(L, -2)) {
@@ -120,20 +120,21 @@ proxy_map(lua_State *L, lua_State *R, int t, int global)
 		lua_newtable(R);
 		lua_pushnil(L);  /* first key */
 		while (lua_next(L, top) != 0) {
+			pop = 1;
 			proxy_map(L, R, lua_gettop(R), 0);
 			lua_pop(L, 1);
 		}
-		lua_pop(L, 1);
+		if (pop)
+			lua_pop(L, 1);
 		break;
 	default:
 		printf("unknown type %s\n", nam);
 	}
-	if (global)
+	if (global) {
 		lua_setglobal(R, nam);
-	else
-		lua_settable(R, t);
-	if (global || lua_type(L, -1) == LUA_TTABLE)
 		lua_pop(R, 1);
+	} else
+		lua_settable(R, t);
 }
 
 static void
@@ -277,14 +278,14 @@ static void
 proxy_set_info(lua_State *L)
 {
 	lua_pushliteral(L, "_COPYRIGHT");
-	lua_pushliteral(L, "Copyright (C) 2011 - 2013 by "
+	lua_pushliteral(L, "Copyright (C) 2011 - 2014 by "
 	    "micro systems marc balmer");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_DESCRIPTION");
 	lua_pushliteral(L, "State proxy for Lua");
 	lua_settable(L, -3);
 	lua_pushliteral(L, "_VERSION");
-	lua_pushliteral(L, "proxy 1.1.1");
+	lua_pushliteral(L, "proxy 1.1.2");
 	lua_settable(L, -3);
 }
 

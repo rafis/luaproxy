@@ -1,10 +1,12 @@
 SRCS=		luaproxy.c
 LIB=		proxy
- 
-CFLAGS+=	-O3 -Wall -fPIC -I/usr/include -I/usr/include/lua5.1
+
+LUAVER=		`lua -v 2>&1 | cut -c 5-7`
+
+CFLAGS+=	-O3 -Wall -fPIC -I/usr/include -I/usr/include/lua${LUAVER}
 LDADD+=		-L/usr/lib
 
-LIBDIR=		/usr/local/share/lua/5.1
+LIBDIR=		/usr/lib/lua/${LUAVER}
 
 ${LIB}.so:	${SRCS:.c=.o}
 		cc -shared -o ${LIB}.so ${CFLAGS} ${SRCS:.c=.o} ${LDADD}
@@ -12,6 +14,5 @@ ${LIB}.so:	${SRCS:.c=.o}
 clean:
 		rm -f *.o *.so
 install:
-	install -d ${LIBDIR}
-	install ${LIB}.so ${LIBDIR}
-
+	install -d ${DESTDIR}${LIBDIR}
+	install ${LIB}.so ${DESTDIR}${LIBDIR}
