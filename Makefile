@@ -1,4 +1,4 @@
-SRCS=		luaproxy.c
+SRCS=		src/luaproxy.c
 LIB=		proxy
 
 OS!=		uname

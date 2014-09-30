@@ -1,4 +1,4 @@
-SRCS=		luaproxy.c
+SRCS=		src/luaproxy.c
 LIB=		proxy
 
 LUAVER=		`lua -v 2>&1 | cut -c 5-7`
